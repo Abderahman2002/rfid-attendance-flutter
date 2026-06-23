@@ -25,7 +25,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
   static const Color _blue = Color(0xFF0039CB);
   static const Color _bg   = Color(0xFFF0F4FF);
 
-  // ── Scroll controller pour Historique ──
   final ScrollController _scrollController = ScrollController();
   final GlobalKey _historyKey = GlobalKey();
   int _selectedIndex = 0;
@@ -49,23 +48,24 @@ class _StudentDashboardState extends State<StudentDashboard> {
     }
   }
 
-  void _scrollToHistory() {
-    final ctx = _historyKey.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(ctx,
-          duration: const Duration(milliseconds: 500), curve: Curves.easeInOut);
-    }
-  }
-
   Future<void> downloadPdf() async {
     try {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(backgroundColor: Colors.blue,
             content: Text("Génération du PDF...")));
+      
+      // ✅ URL corrigée — utilise ApiService.baseUrl
+      final url = "${ApiService.baseUrl}/student/report/pdf/";
+      print("PDF URL: $url");
+      print("TOKEN: ${widget.token}");
+      
       final res = await http.get(
-        Uri.parse("http://192.168.0.114:8000/api/student/report/pdf/"),
+        Uri.parse(url),
         headers: {"Authorization": "Bearer ${widget.token}"},
       );
+      
+      print("PDF STATUS: ${res.statusCode}");
+      
       if (res.statusCode == 200) {
         await downloadPdfBytes(res.bodyBytes, "rapport_presence.pdf");
         if (!mounted) return;
@@ -73,7 +73,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
           const SnackBar(backgroundColor: Colors.green,
               content: Text("PDF téléchargé ✅")));
       } else {
-        throw Exception("Erreur ${res.statusCode}");
+        throw Exception("Erreur ${res.statusCode}: ${res.body}");
       }
     } catch (e) {
       if (!mounted) return;
@@ -146,12 +146,10 @@ class _StudentDashboardState extends State<StudentDashboard> {
     );
   }
 
-  // ── Desktop Layout ──────────────────────────────────────────
   Widget _buildDesktop() {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Sidebar ──
         Container(
           width: 260,
           height: double.infinity,
@@ -183,7 +181,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
             ],
           ),
         ),
-        // ── Contenu ──
         Expanded(
           child: SingleChildScrollView(
             controller: _scrollController,
@@ -191,7 +188,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Stats 4 cartes ──
                 GridView.count(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -310,7 +306,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
     );
   }
 
-  // ── Mobile Layout ────────────────────────────────────────────
   Widget _buildMobile() {
     return SingleChildScrollView(
       controller: _scrollController,
@@ -321,7 +316,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
         children: [
           _buildStudentCard(),
           const SizedBox(height: 12),
-          // ── Boutons Profil + PDF ──
           Row(children: [
             Expanded(
               child: ElevatedButton.icon(
@@ -356,9 +350,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
               ),
             ),
           ]),
-          const SizedBox(height: 20),
-          // KEEP old PDF button hidden - replaced above
-
           const SizedBox(height: 24),
           Row(children: [
             Expanded(child: _statCard("Présences", presentCount.toString(),

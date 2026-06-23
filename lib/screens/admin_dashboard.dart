@@ -171,16 +171,14 @@ class _AdminDashboardState extends State<AdminDashboard>
                 const Text('Résultats du filtre',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 8),
-                Row(children: [
+                Wrap(spacing: 8, children: [
                   _filterChip('✅ ${_filterResult!['present']} Présents', const Color(0xFF16A34A)),
-                  const SizedBox(width: 8),
                   _filterChip('❌ ${_filterResult!['absent']} Absents', Colors.red),
-                  const SizedBox(width: 8),
                   _filterChip('📊 ${_filterResult!['rate']}%', _btn),
                 ]),
               ])),
             Expanded(child: sessions.isEmpty
-              ? const Center(child: Text('Aucune session pour cette période'))
+              ? const Center(child: Text('Aucune séance pour cette période'))
               : ListView.builder(
                   controller: ctrl, padding: const EdgeInsets.fromLTRB(20,8,20,20),
                   itemCount: sessions.length,
@@ -197,11 +195,9 @@ class _AdminDashboardState extends State<AdminDashboard>
                         Text('📅 ${s['date']}  ⏰ ${s['start_time']?.toString().substring(0,5)} → ${s['end_time']?.toString().substring(0,5)}',
                             style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
                         const SizedBox(height: 8),
-                        Row(children: [
+                        Wrap(spacing: 6, children: [
                           _filterChip('✅ ${s['present']}', const Color(0xFF16A34A)),
-                          const SizedBox(width: 6),
                           _filterChip('❌ ${s['absent']}', Colors.red),
-                          const SizedBox(width: 6),
                           _filterChip('📊 ${s['rate']}%', _btn),
                         ]),
                       ]),
@@ -466,26 +462,37 @@ class _AdminDashboardState extends State<AdminDashboard>
                           ]),
                           const SizedBox(height: 10),
                           ...schedule.map((s) => Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: Row(children: [
-                              Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(color: const Color(0xFF0039CB).withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(6)),
-                                child: Text(s['day'] ?? '', style: const TextStyle(fontSize: 11, color: Color(0xFF0039CB), fontWeight: FontWeight.w700))),
-                              const SizedBox(width: 8),
-                              Text('${s['start_time']} → ${s['end_time']}', style: const TextStyle(fontSize: 12)),
-                              const SizedBox(width: 8),
-                              Text('Salle ${s['classroom']}', style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
-                              const Spacer(),
-                              GestureDetector(
-                                onTap: () async {
-                                  try {
-                                    await AdminService.deleteSchedule(username: t['username'], scheduleId: s['id']);
-                                    _loadSchedules();
-                                    _showSnack('Cours supprimé ✅', const Color(0xFF16A34A));
-                                  } catch (e) { _showSnack('Erreur: $e', Colors.red); }
-                                },
-                                child: const Icon(Icons.delete_outline, color: Colors.red, size: 18)),
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Row(children: [
+                                Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(color: const Color(0xFF0039CB).withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(6)),
+                                  child: Text(s['day'] ?? '', style: const TextStyle(fontSize: 11, color: Color(0xFF0039CB), fontWeight: FontWeight.w700))),
+                                const SizedBox(width: 8),
+                                Expanded(child: Row(children: [
+                                  const Icon(Icons.alarm, size: 12, color: Color(0xFF6B7280)),
+                                  const SizedBox(width: 4),
+                                  Flexible(child: Text('${s['start_time']} → ${s['end_time']}',
+                                    style: const TextStyle(fontSize: 12),
+                                    overflow: TextOverflow.ellipsis)),
+                                ])),
+                                const SizedBox(width: 8),
+                                GestureDetector(
+                                  onTap: () async {
+                                    try {
+                                      await AdminService.deleteSchedule(username: t['username'], scheduleId: s['id']);
+                                      _loadSchedules();
+                                      _showSnack('Cours supprimé ✅', const Color(0xFF16A34A));
+                                    } catch (e) { _showSnack('Erreur: $e', Colors.red); }
+                                  },
+                                  child: const Icon(Icons.delete_outline, color: Colors.red, size: 18)),
+                              ]),
+                              const SizedBox(height: 2),
+                              Padding(
+                                padding: const EdgeInsets.only(left: 4),
+                                child: Text('📍 Salle ${s['classroom']}',
+                                    style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)))),
                             ]),
                           )),
                         ]),
@@ -498,6 +505,10 @@ class _AdminDashboardState extends State<AdminDashboard>
     );
   }
 
+  // ✅ CORRIGÉ — le bouton "Ajouter" est désormais toujours accessible.
+  // Le modal a une hauteur maximale fixée (constraints), et le contenu scrollable
+  // est lui-même contraint à l'intérieur de cette hauteur (ConstrainedBox),
+  // donc le SingleChildScrollView peut toujours défiler jusqu'au bouton.
   void _showAddScheduleModal() {
     String? selectedUsername;
     String? selectedDay;
@@ -508,75 +519,122 @@ class _AdminDashboardState extends State<AdminDashboard>
     final classrooms = ['C301','B201','A102','A101','SALL3','SALL7','AMPHI'];
     if (_schedules.isEmpty) _loadSchedules();
     showModalBottomSheet(
-      context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.9,
+      ),
       builder: (ctx) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: const BoxDecoration(color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
-          child: StatefulBuilder(
-            builder: (ctx, setS) => SingleChildScrollView(
-              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                _sheetHandle(), const SizedBox(height: 16),
-                const Text('Ajouter un cours au planning', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 20),
-                DropdownButtonFormField<String>(value: selectedUsername,
-                  decoration: InputDecoration(labelText: 'Professeur', prefixIcon: const Icon(Icons.person),
-                    filled: true, fillColor: const Color(0xFFF8F9FA),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
-                  items: _schedules.map((t) => DropdownMenuItem<String>(
-                    value: t['username'] as String,
-                    child: Text('${t['full_name']} — ${t['subject']}'))).toList(),
-                  onChanged: (v) => setS(() => selectedUsername = v)),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(value: selectedDay,
-                  decoration: InputDecoration(labelText: 'Jour', prefixIcon: const Icon(Icons.calendar_today),
-                    filled: true, fillColor: const Color(0xFFF8F9FA),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
-                  items: days.map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
-                  onChanged: (v) => setS(() => selectedDay = v)),
-                const SizedBox(height: 12),
-                TextField(controller: startCtrl, keyboardType: TextInputType.datetime,
-                  decoration: InputDecoration(labelText: 'Heure début (ex: 08:00)', hintText: '08:00',
-                    prefixIcon: const Icon(Icons.access_time, color: Color(0xFF0039CB)),
-                    filled: true, fillColor: const Color(0xFFF8F9FA),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
-                  onChanged: (_) => setS(() {})),
-                const SizedBox(height: 12),
-                TextField(controller: endCtrl, keyboardType: TextInputType.datetime,
-                  decoration: InputDecoration(labelText: 'Heure fin (ex: 10:00)', hintText: '10:00',
-                    prefixIcon: const Icon(Icons.timer, color: Color(0xFF0039CB)),
-                    filled: true, fillColor: const Color(0xFFF8F9FA),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
-                  onChanged: (_) => setS(() {})),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(value: selectedClassroom,
-                  decoration: InputDecoration(labelText: 'Salle', prefixIcon: const Icon(Icons.location_on, color: Color(0xFF0039CB)),
-                    filled: true, fillColor: const Color(0xFFF8F9FA),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
-                  items: classrooms.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                  onChanged: (v) => setS(() => selectedClassroom = v)),
-                const SizedBox(height: 20),
-                SizedBox(width: double.infinity, height: 52,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0039CB),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-                    onPressed: () async {
-                      if (selectedUsername == null || selectedDay == null ||
-                          startCtrl.text.trim().isEmpty || endCtrl.text.trim().isEmpty || selectedClassroom == null) {
-                        _showSnack('Remplissez tous les champs', Colors.red); return;
+        child: StatefulBuilder(
+          builder: (ctx, setS) => Container(
+            decoration: const BoxDecoration(color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.9
+                    - MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  _sheetHandle(), const SizedBox(height: 16),
+                  const Text('Ajouter un cours au planning', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 20),
+                  DropdownButtonFormField<String>(value: selectedUsername,
+                    decoration: InputDecoration(labelText: 'Professeur', prefixIcon: const Icon(Icons.person),
+                      filled: true, fillColor: const Color(0xFFF8F9FA),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+                    items: _schedules.map((t) => DropdownMenuItem<String>(
+                      value: t['username'] as String,
+                      child: Text('${t['full_name']} — ${t['subject']}', overflow: TextOverflow.ellipsis))).toList(),
+                    onChanged: (v) => setS(() => selectedUsername = v)),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(value: selectedDay,
+                    decoration: InputDecoration(labelText: 'Jour', prefixIcon: const Icon(Icons.calendar_today),
+                      filled: true, fillColor: const Color(0xFFF8F9FA),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+                    items: days.map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
+                    onChanged: (v) => setS(() => selectedDay = v)),
+                  const SizedBox(height: 12),
+                  GestureDetector(
+                    onTap: () async {
+                      final TimeOfDay? picked = await showTimePicker(
+                        context: context,
+                        initialTime: const TimeOfDay(hour: 8, minute: 0),
+                      );
+                      if (picked != null) {
+                        final h = picked.hour.toString().padLeft(2, '0');
+                        final m = picked.minute.toString().padLeft(2, '0');
+                        startCtrl.text = h + ':' + m;
+                        setS(() {});
                       }
-                      try {
-                        await AdminService.addSchedule(username: selectedUsername!, day: selectedDay!,
-                          startTime: startCtrl.text.trim(), endTime: endCtrl.text.trim(), classroom: selectedClassroom!);
-                        if (mounted) { Navigator.pop(context); _showSnack('Cours ajouté ✅', const Color(0xFF16A34A)); }
-                      } catch (e) { _showSnack('Erreur: $e', Colors.red); }
                     },
-                    child: const Text('Ajouter', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
-                  )),
-                const SizedBox(height: 8),
-              ]),
+                    child: AbsorbPointer(
+                      child: TextField(
+                        controller: startCtrl,
+                        decoration: InputDecoration(
+                          labelText: startCtrl.text.isEmpty ? 'Heure début' : startCtrl.text,
+                          prefixIcon: const Icon(Icons.alarm, color: Color(0xFF0039CB)),
+                          filled: true, fillColor: const Color(0xFFF8F9FA),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  GestureDetector(
+                    onTap: () async {
+                      final TimeOfDay? picked = await showTimePicker(
+                        context: context,
+                        initialTime: const TimeOfDay(hour: 10, minute: 0),
+                      );
+                      if (picked != null) {
+                        final h = picked.hour.toString().padLeft(2, '0');
+                        final m = picked.minute.toString().padLeft(2, '0');
+                        endCtrl.text = h + ':' + m;
+                        setS(() {});
+                      }
+                    },
+                    child: AbsorbPointer(
+                      child: TextField(
+                        controller: endCtrl,
+                        decoration: InputDecoration(
+                          labelText: endCtrl.text.isEmpty ? 'Heure fin' : endCtrl.text,
+                          prefixIcon: const Icon(Icons.alarm_on, color: Color(0xFF0039CB)),
+                          filled: true, fillColor: const Color(0xFFF8F9FA),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(value: selectedClassroom,
+                    decoration: InputDecoration(labelText: 'Salle', prefixIcon: const Icon(Icons.location_on, color: Color(0xFF0039CB)),
+                      filled: true, fillColor: const Color(0xFFF8F9FA),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+                    items: classrooms.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                    onChanged: (v) => setS(() => selectedClassroom = v)),
+                  const SizedBox(height: 20),
+                  SizedBox(width: double.infinity, height: 52,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0039CB),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                      onPressed: () async {
+                        if (selectedUsername == null || selectedDay == null ||
+                            startCtrl.text.trim().isEmpty || endCtrl.text.trim().isEmpty || selectedClassroom == null) {
+                          _showSnack('Remplissez tous les champs', Colors.red); return;
+                        }
+                        try {
+                          await AdminService.addSchedule(username: selectedUsername!, day: selectedDay!,
+                            startTime: startCtrl.text.trim(), endTime: endCtrl.text.trim(), classroom: selectedClassroom!);
+                          if (mounted) { Navigator.pop(context); _showSnack('Cours ajouté ✅', const Color(0xFF16A34A)); }
+                        } catch (e) { _showSnack('Erreur: $e', Colors.red); }
+                      },
+                      child: const Text('Ajouter', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
+                    )),
+                  const SizedBox(height: 20),
+                ]),
+              ),
             ),
           ),
         ),
@@ -623,8 +681,8 @@ class _AdminDashboardState extends State<AdminDashboard>
             Padding(padding: const EdgeInsets.fromLTRB(20,16,20,8),
               child: Row(children: [
                 const Icon(Icons.history, color: _btn), const SizedBox(width: 10),
-                Text('Toutes les sessions (${_sessions.length})',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF111827))),
+                Expanded(child: Text('Toutes les séances (${_sessions.length})',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF111827)))),
               ])),
             Container(margin: const EdgeInsets.symmetric(horizontal: 20),
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
@@ -646,41 +704,60 @@ class _AdminDashboardState extends State<AdminDashboard>
   }
 
   Widget _sessionList(ScrollController ctrl, List<SessionInfo> list) {
-    if (list.isEmpty) return const Center(child: Text('Aucune session', style: TextStyle(color: Color(0xFF9CA3AF))));
+    if (list.isEmpty) return const Center(child: Text('Aucune séance', style: TextStyle(color: Color(0xFF9CA3AF))));
     return ListView.builder(controller: ctrl, padding: const EdgeInsets.fromLTRB(20,8,20,20),
       itemCount: list.length, itemBuilder: (_, i) => RecentSessionCard(session: list[i]));
   }
 
   void _showProfileModal() {
-    showModalBottomSheet(context: context, backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        padding: const EdgeInsets.all(28),
-        decoration: const BoxDecoration(color: _white, borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          _sheetHandle(), const SizedBox(height: 24),
-          Container(width: 80, height: 80,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(colors: [_sidebar, _btn], begin: Alignment.topLeft, end: Alignment.bottomRight),
-              borderRadius: BorderRadius.circular(24)),
-            child: const Icon(Icons.admin_panel_settings, color: _white, size: 40)),
-          const SizedBox(height: 16),
-          Text(_profile['full_name'] ?? 'Admin', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          Text(_profile['email'] ?? '', style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
-          const SizedBox(height: 8),
-          Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            decoration: BoxDecoration(color: const Color(0xFFDBEAFE), borderRadius: BorderRadius.circular(10)),
-            child: const Text('Administrateur', style: TextStyle(color: _btn, fontWeight: FontWeight.w700, fontSize: 12))),
-          const SizedBox(height: 28),
-          SizedBox(width: double.infinity, height: 52,
-            child: ElevatedButton.icon(
-              onPressed: () { Navigator.pop(context); _logout(); },
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade400,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 0),
-              icon: const Icon(Icons.logout, color: _white),
-              label: const Text('Se déconnecter', style: TextStyle(color: _white, fontWeight: FontWeight.w700, fontSize: 15)))),
-          const SizedBox(height: 8),
-        ]),
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: _white,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            // Avatar
+            Container(width: 72, height: 72,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [_sidebar, _btn],
+                    begin: Alignment.topLeft, end: Alignment.bottomRight),
+                borderRadius: BorderRadius.circular(20)),
+              child: const Icon(Icons.admin_panel_settings, color: _white, size: 36)),
+            const SizedBox(height: 12),
+            // Nom
+            Text(_profile['full_name'] ?? 'Admin',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF111827))),
+            const SizedBox(height: 4),
+            // Email
+            Text(_profile['email'] ?? '',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+            const SizedBox(height: 8),
+            // Badge
+            Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(color: const Color(0xFFDBEAFE), borderRadius: BorderRadius.circular(10)),
+              child: const Text('Administrateur',
+                  style: TextStyle(color: _btn, fontWeight: FontWeight.w700, fontSize: 12))),
+            const SizedBox(height: 24),
+            // Bouton déconnecter — bien visible au centre
+            SizedBox(width: double.infinity, height: 50,
+              child: ElevatedButton.icon(
+                onPressed: () { Navigator.pop(context); _logout(); },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red.shade500,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  elevation: 0),
+                icon: const Icon(Icons.logout_rounded, color: _white, size: 20),
+                label: const Text('Se déconnecter',
+                    style: TextStyle(color: _white, fontWeight: FontWeight.w800, fontSize: 15)))),
+            const SizedBox(height: 4),
+            // Annuler
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Annuler', style: TextStyle(color: Color(0xFF6B7280), fontSize: 13))),
+          ]),
+        ),
       ));
   }
 
@@ -747,7 +824,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           _sidebarItem(Icons.people_outline, 'Étudiants', false, onTap: _showStudentsModal),
           _sidebarItem(Icons.person_outline, 'Professeurs', false, onTap: _showAddTeacherModal),
           _sidebarItem(Icons.calendar_month, 'Planning', false, onTap: _showScheduleModal),
-          _sidebarItem(Icons.history, 'Sessions', false, onTap: _showAllSessionsModal),
+          _sidebarItem(Icons.history, 'Séances', false, onTap: _showAllSessionsModal),
           _sidebarItem(Icons.book_outlined, 'Stats Matières', false, onTap: _showSubjectStatsModal),
           _sidebarItem(Icons.school_outlined, 'Stats Spécialités', false, onTap: _showSpecialityStatsModal),
           _sidebarItem(Icons.picture_as_pdf_outlined, 'Rapport PDF', false, onTap: _downloadPdf),
@@ -783,7 +860,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                 children: [
                   AdminStatCard(title: 'Étudiants', value: '${_stats?.students ?? 0}', icon: Icons.school, color: _btn, bgColor: const Color(0xFFDBEAFE)),
                   AdminStatCard(title: 'Professeurs', value: '${_stats?.teachers ?? 0}', icon: Icons.person_outline, color: const Color(0xFF7C3AED), bgColor: const Color(0xFFEDE9FE)),
-                  AdminStatCard(title: 'Sessions', value: '${_stats?.sessions ?? 0}', icon: Icons.calendar_today_outlined, color: const Color(0xFF0891B2), bgColor: const Color(0xFFCFFAFE)),
+                  AdminStatCard(title: 'Séances', value: '${_stats?.sessions ?? 0}', icon: Icons.calendar_today_outlined, color: const Color(0xFF0891B2), bgColor: const Color(0xFFCFFAFE)),
                   AdminStatCard(title: 'Taux Présence', value: '${_stats?.attendanceRate ?? 0}%', icon: Icons.bar_chart, color: const Color(0xFF16A34A), bgColor: const Color(0xFFDCFCE7)),
                 ]),
               const SizedBox(height: 24),
@@ -798,7 +875,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   AdminActionCard(title: 'Voir les étudiants', subtitle: '${_students.length} étudiants', icon: Icons.people_outline, color: _btn, onTap: _showStudentsModal),
                   AdminActionCard(title: 'Taux présence', subtitle: 'Stats par étudiant', icon: Icons.bar_chart, color: const Color(0xFF7C3AED), onTap: _showStudentsStatsModal),
                   AdminActionCard(title: 'Cours en direct', subtitle: '${activeSessions.length} actif(s)', icon: Icons.cast_for_education, color: const Color(0xFF16A34A), onTap: _showActiveSessionsModal),
-                  AdminActionCard(title: 'Toutes les sessions', subtitle: '${_sessions.length} sessions', icon: Icons.history, color: const Color(0xFF0891B2), onTap: _showAllSessionsModal),
+                  AdminActionCard(title: 'Toutes les séances', subtitle: '${_sessions.length} séances', icon: Icons.history, color: const Color(0xFF0891B2), onTap: _showAllSessionsModal),
                   AdminActionCard(title: 'Stats par Matière', subtitle: 'Taux par matière', icon: Icons.book_outlined, color: const Color(0xFF0891B2), onTap: _showSubjectStatsModal),
                   AdminActionCard(title: 'Stats Spécialité', subtitle: 'INFO, Dev, Réseaux...', icon: Icons.school_outlined, color: const Color(0xFF7C3AED), onTap: _showSpecialityStatsModal),
                   AdminActionCard(title: 'Ajouter Étudiant', subtitle: 'Nouveau compte étudiant', icon: Icons.person_add_outlined, color: const Color(0xFF16A34A), onTap: _showAddStudentModal),
@@ -813,7 +890,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   ...activeSessions.map((s) => ActiveSessionCard(session: s)),
                   if (_stats != null && _stats!.teachersStats.isNotEmpty) ...[
                     const SizedBox(height: 24),
-                    _sectionTitle('Sessions par Professeur'),
+                    _sectionTitle('Séances par Professeur'),
                     const SizedBox(height: 14),
                     ..._stats!.teachersStats.asMap().entries
                         .map((e) => TeacherStatCard(teacher: e.value, index: e.key)),
@@ -822,7 +899,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                 if (activeSessions.isNotEmpty) const SizedBox(width: 20),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    _sectionTitle('Sessions récentes'),
+                    _sectionTitle('Séances récentes'),
                     GestureDetector(onTap: _showAllSessionsModal,
                       child: const Text('Voir tout →', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _btn))),
                   ]),
@@ -834,7 +911,6 @@ class _AdminDashboardState extends State<AdminDashboard>
                   _buildAttendanceBar(),
                 ])),
               ]),
-
               const SizedBox(height: 20),
             ])))),
       ])),
@@ -903,7 +979,7 @@ class _AdminDashboardState extends State<AdminDashboard>
               children: [
                 AdminStatCard(title: 'Étudiants', value: '${_stats?.students ?? 0}', icon: Icons.school, color: _btn, bgColor: const Color(0xFFDBEAFE)),
                 AdminStatCard(title: 'Professeurs', value: '${_stats?.teachers ?? 0}', icon: Icons.person_outline, color: const Color(0xFF7C3AED), bgColor: const Color(0xFFEDE9FE)),
-                AdminStatCard(title: 'Sessions', value: '${_stats?.sessions ?? 0}', icon: Icons.calendar_today_outlined, color: const Color(0xFF0891B2), bgColor: const Color(0xFFCFFAFE)),
+                AdminStatCard(title: 'Séances', value: '${_stats?.sessions ?? 0}', icon: Icons.calendar_today_outlined, color: const Color(0xFF0891B2), bgColor: const Color(0xFFCFFAFE)),
                 AdminStatCard(title: 'Taux Présence', value: '${_stats?.attendanceRate ?? 0}%', icon: Icons.bar_chart, color: const Color(0xFF16A34A), bgColor: const Color(0xFFDCFCE7)),
               ]),
             const SizedBox(height: 24),
@@ -916,7 +992,7 @@ class _AdminDashboardState extends State<AdminDashboard>
             const SizedBox(height: 10),
             AdminActionCard(title: 'Cours en direct', subtitle: '${activeSessions.length} professeur(s) actif(s)', icon: Icons.cast_for_education, color: const Color(0xFF16A34A), onTap: _showActiveSessionsModal),
             const SizedBox(height: 10),
-            AdminActionCard(title: 'Toutes les sessions', subtitle: '${_sessions.length} sessions au total', icon: Icons.history, color: const Color(0xFF0891B2), onTap: _showAllSessionsModal),
+            AdminActionCard(title: 'Toutes les séances', subtitle: '${_sessions.length} séances au total', icon: Icons.history, color: const Color(0xFF0891B2), onTap: _showAllSessionsModal),
             const SizedBox(height: 10),
             AdminActionCard(title: 'Stats par Matière', subtitle: 'Taux de présence par matière', icon: Icons.book_outlined, color: const Color(0xFF0891B2), onTap: _showSubjectStatsModal),
             const SizedBox(height: 10),
@@ -939,7 +1015,7 @@ class _AdminDashboardState extends State<AdminDashboard>
             ],
             if (recentSessions.isNotEmpty) ...[
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                _sectionTitle('Sessions récentes'),
+                _sectionTitle('Séances récentes'),
                 GestureDetector(onTap: _showAllSessionsModal,
                   child: const Text('Voir tout →', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _btn))),
               ]),
@@ -948,7 +1024,7 @@ class _AdminDashboardState extends State<AdminDashboard>
               const SizedBox(height: 20),
             ],
             if (_stats != null && _stats!.teachersStats.isNotEmpty) ...[
-              _sectionTitle('Sessions par Professeur'), const SizedBox(height: 14),
+              _sectionTitle('Séances par Professeur'), const SizedBox(height: 14),
               ..._stats!.teachersStats.asMap().entries.map((e) => TeacherStatCard(teacher: e.value, index: e.key)),
               const SizedBox(height: 20),
             ],
@@ -981,7 +1057,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   border: Border.all(color: _btn.withOpacity(0.2))),
               child: Row(children: [
                 const Icon(Icons.calendar_today, size: 14, color: Color(0xFF0D6EFD)), const SizedBox(width: 6),
-                Text(fmtDate(_dateDebut), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                Flexible(child: Text(fmtDate(_dateDebut), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
               ])))),
           const Padding(padding: EdgeInsets.symmetric(horizontal: 8),
               child: Text('→', style: TextStyle(fontWeight: FontWeight.w700))),
@@ -996,7 +1072,7 @@ class _AdminDashboardState extends State<AdminDashboard>
                   border: Border.all(color: _btn.withOpacity(0.2))),
               child: Row(children: [
                 const Icon(Icons.calendar_today, size: 14, color: Color(0xFF0D6EFD)), const SizedBox(width: 6),
-                Text(fmtDate(_dateFin), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                Flexible(child: Text(fmtDate(_dateFin), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
               ])))),
         ]),
         const SizedBox(height: 12),
@@ -1029,8 +1105,8 @@ class _AdminDashboardState extends State<AdminDashboard>
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 12, offset: const Offset(0,4))]),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          const Text('Taux de présence global',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF111827))),
+          const Flexible(child: Text('Taux de présence global',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF111827)))),
           Text('$rate%', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF16A34A))),
         ]),
         const SizedBox(height: 14),
@@ -1090,7 +1166,7 @@ class _AdminDashboardState extends State<AdminDashboard>
           Padding(padding: const EdgeInsets.fromLTRB(20,16,20,12),
             child: Row(children: [
               Icon(icon, color: color), const SizedBox(width: 10),
-              Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF111827))),
+              Expanded(child: Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF111827)))),
             ])),
           Expanded(child: child),
         ]),

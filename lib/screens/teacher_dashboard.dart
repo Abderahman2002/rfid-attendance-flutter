@@ -36,9 +36,9 @@ class _TeacherDashboardState extends State<TeacherDashboard>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _loadAll();
-    // Auto-refresh toutes les 5 secondes
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (_activeSession != null) _loadAll(silent: true);
+    // ✅ Rafraîchissement toutes les 500ms = presque instantané
+    _timer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      _refreshActive();
     });
   }
 
@@ -70,13 +70,36 @@ class _TeacherDashboardState extends State<TeacherDashboard>
     }
   }
 
-  // ── Session active ──
+  // ✅ Rafraîchissement rapide — endpoint ultra rapide
+  Future<void> _refreshActive() async {
+    try {
+      final res = await http.get(
+        Uri.parse(ApiService.baseUrl + '/teacher/active-attendance/'),
+        headers: ApiService.headers(widget.token),
+      ).timeout(const Duration(milliseconds: 800));
+      if (res.statusCode == 200 && mounted) {
+        final data = jsonDecode(res.body);
+        if (data['active'] == true) {
+          setState(() {
+            final idx = _sessions.indexWhere((s) => s['is_active'] == true);
+            if (idx != -1) {
+              _sessions[idx]['present_count'] = data['present_count'];
+              _sessions[idx]['absent_count']  = data['absent_count'];
+              _sessions[idx]['attendances']   = data['attendances'];
+            } else {
+              _loadAll(silent: true);
+            }
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
   Map<String, dynamic>? get _activeSession =>
       _sessions.where((s) => s['is_active'] == true).isNotEmpty
           ? _sessions.firstWhere((s) => s['is_active'] == true)
           : null;
 
-  // ── Stats calculées ──
   int get _totalSessions => _sessions.length;
   int get _totalPresent  => _sessions.fold(0, (s, e) => s + ((e['present_count'] ?? 0) as int));
   int get _totalAbsent   => _sessions.fold(0, (s, e) => s + ((e['absent_count'] ?? 0) as int));
@@ -84,7 +107,6 @@ class _TeacherDashboardState extends State<TeacherDashboard>
   Future<void> _startSession(Map<String, dynamic> slot) async {
     try {
       _showSnack('Lancement du cours...', _blue);
-      // Cherche subject_id depuis _teacher
       final subjects = (_teacher['subjects'] as List? ?? []);
       final subjectName = slot['subject'] ?? '';
       int subjectId = 1;
@@ -94,7 +116,6 @@ class _TeacherDashboardState extends State<TeacherDashboard>
           break;
         }
       }
-      // Cherche classroom_id depuis l'API classrooms
       final classrooms = await ApiService.getClassrooms(widget.token);
       final classroomName = slot['classroom'] ?? '';
       int classroomId = 1;
@@ -104,31 +125,13 @@ class _TeacherDashboardState extends State<TeacherDashboard>
           break;
         }
       }
-      final result = await ApiService.startSession(
+      await ApiService.startSession(
         widget.token,
         subjectId,
         classroomId,
         slot['start_time'] ?? '08:00',
         slot['end_time']   ?? '10:00',
       );
-      // ── Envoie WebHook au scanner NFC ──
-      try {
-        await http.post(
-          Uri.parse('http://192.168.0.124:5000/webhook'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'event':    'session_started',
-            'username': _teacher['username'] ?? '',
-            'token':    widget.token,
-            'teacher':  _teacher['full_name'] ?? '',
-            'subject':  slot['subject'] ?? '',
-            'session_id': result['session_id'],
-          }),
-        );
-        print('✅ WebHook envoyé au scanner NFC');
-      } catch (e) {
-        print('⚠️ WebHook erreur: $e');
-      }
       _showSnack('✅ Cours lancé !', Colors.green);
       _loadAll();
     } catch (e) {
@@ -140,21 +143,6 @@ class _TeacherDashboardState extends State<TeacherDashboard>
     try {
       _showSnack('Arrêt du cours...', Colors.orange);
       await ApiService.endSession(widget.token);
-      // ── Envoie WebHook stop au scanner NFC ──
-      try {
-        await http.post(
-          Uri.parse('http://192.168.0.124:5000/webhook'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'event':    'session_ended',
-            'username': _teacher['username'] ?? '',
-            'token':    widget.token,
-            'teacher':  _teacher['full_name'] ?? '',
-          }),
-        );
-      } catch (e) {
-        print('⚠️ WebHook stop erreur: $e');
-      }
       _showSnack('✅ Cours terminé !', const Color(0xFF16A34A));
       _loadAll();
     } catch (e) {
@@ -179,16 +167,23 @@ class _TeacherDashboardState extends State<TeacherDashboard>
     }
   }
 
+  // ✅ CORRECTION 1 — Logique heure début ET heure fin
   bool _canStartNow(Map<String, dynamic> slot) {
     try {
-      final now    = TimeOfDay.now();
-      final parts  = (slot['start_time'] as String).split(':');
-      final start  = TimeOfDay(
-          hour: int.parse(parts[0]), minute: int.parse(parts[1]));
-      final totalNow   = now.hour * 60 + now.minute;
-      final totalStart = start.hour * 60 + start.minute;
-      return (totalNow >= totalStart - 15) && (totalNow <= totalStart + 120);
-    } catch (_) { return true; }
+      final now      = TimeOfDay.now();
+      final nowTotal = now.hour * 60 + now.minute;
+
+      // Heure début
+      final startParts = (slot['start_time'] as String).split(':');
+      final startTotal = int.parse(startParts[0]) * 60 + int.parse(startParts[1]);
+
+      // Heure fin
+      final endParts = (slot['end_time'] as String).split(':');
+      final endTotal = int.parse(endParts[0]) * 60 + int.parse(endParts[1]);
+
+      // ✅ Logique : 15min avant début ET avant la fin du cours
+      return (nowTotal >= startTotal - 15) && (nowTotal <= endTotal);
+    } catch (_) { return false; }
   }
 
   @override
@@ -247,83 +242,6 @@ class _TeacherDashboardState extends State<TeacherDashboard>
     );
   }
 
-  void _showProfile() {
-    final subjects = (_teacher['subjects'] as List? ?? []);
-    showModalBottomSheet(
-      context: context, backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (_) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: Container(
-        padding: const EdgeInsets.all(28),
-        decoration: const BoxDecoration(color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
-        child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(margin: const EdgeInsets.only(bottom: 16),
-              width: 40, height: 4,
-              decoration: BoxDecoration(color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(4))),
-          Container(width: 80, height: 80,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                  colors: [Color(0xFF0039CB), Color(0xFF1565C0)]),
-              borderRadius: BorderRadius.circular(24)),
-            child: const Icon(Icons.person, color: Colors.white, size: 40)),
-          const SizedBox(height: 16),
-          Text(_teacher['full_name'] ?? '',
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 6),
-          Text(_teacher['email'] ?? '',
-              style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            decoration: BoxDecoration(color: const Color(0xFFDBEAFE),
-                borderRadius: BorderRadius.circular(10)),
-            child: const Text('Professeur',
-                style: TextStyle(color: Color(0xFF0039CB),
-                    fontWeight: FontWeight.w700, fontSize: 13))),
-          const SizedBox(height: 20),
-          ...subjects.map((s) => Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: const Color(0xFFF0F4FF),
-                borderRadius: BorderRadius.circular(14)),
-            child: Row(children: [
-              const Icon(Icons.book_outlined, color: Color(0xFF0039CB)),
-              const SizedBox(width: 12),
-              Text(s['name'] ?? '',
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-            ]))),
-          const SizedBox(height: 20),
-          SizedBox(width: double.infinity, height: 52,
-            child: ElevatedButton.icon(
-              onPressed: () { Navigator.pop(context); _logout(); },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red.shade400,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                elevation: 0),
-              icon: const Icon(Icons.logout, color: Colors.white),
-              label: const Text('Se déconnecter',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)))),
-          const SizedBox(height: 8),
-        ])),
-      )));
-  }
-
-  Widget _profileStat(String label, String value, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: color.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(12)),
-      child: Column(children: [
-        Text(value, style: TextStyle(fontSize: 22,
-            fontWeight: FontWeight.w800, color: color)),
-        Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
-      ]),
-    );
-  }
-
   Widget _buildTabs() {
     return Container(
       color: _blue,
@@ -351,16 +269,12 @@ class _TeacherDashboardState extends State<TeacherDashboard>
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(20),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-
-          // ── Cours actif ──
           if (active != null) ...[
             _buildActiveSessionCard(active),
             const SizedBox(height: 20),
           ],
-
-          // ── Stats ──
           Row(children: [
-            Expanded(child: _statCard('Sessions', '$_totalSessions',
+            Expanded(child: _statCard('Séances', '$_totalSessions',
                 Icons.calendar_today, _blue, const Color(0xFFDBEAFE))),
             const SizedBox(width: 14),
             Expanded(child: _statCard('Présences', '$_totalPresent',
@@ -370,9 +284,7 @@ class _TeacherDashboardState extends State<TeacherDashboard>
                 Icons.cancel, Colors.red, const Color(0xFFFEE2E2))),
           ]),
           const SizedBox(height: 24),
-
-          // ── Sessions récentes ──
-          const Text('Sessions récentes',
+          const Text('Séances récentes',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800,
                   color: Color(0xFF111827))),
           const SizedBox(height: 14),
@@ -380,7 +292,7 @@ class _TeacherDashboardState extends State<TeacherDashboard>
             Container(padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(color: Colors.white,
                   borderRadius: BorderRadius.circular(16)),
-              child: const Center(child: Text('Aucune session',
+              child: const Center(child: Text('Aucune séance',
                   style: TextStyle(color: Color(0xFF9CA3AF)))))
           else
             ...sessions.map((s) => _sessionCard(s)),
@@ -392,7 +304,6 @@ class _TeacherDashboardState extends State<TeacherDashboard>
   Widget _buildActiveSessionCard(Map<String, dynamic> active) {
     final present = active['present_count'] ?? 0;
     final absent  = active['absent_count'] ?? 0;
-    final total   = active['students_count'] ?? 0;
     final attendances = (active['attendances'] as List? ?? []);
     bool _showList = false;
 
@@ -403,122 +314,116 @@ class _TeacherDashboardState extends State<TeacherDashboard>
           borderRadius: BorderRadius.circular(20),
           boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08),
               blurRadius: 12, offset: const Offset(0,4))]),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // ── Header ──
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Expanded(child: Text(active['subject'] ?? '',
-                    style: const TextStyle(fontSize: 18,
-                        fontWeight: FontWeight.w800, color: Color(0xFF111827)))),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF16A34A),
-                    borderRadius: BorderRadius.circular(20)),
-                  child: const Text('EN COURS',
-                      style: TextStyle(color: Colors.white,
-                          fontWeight: FontWeight.w800, fontSize: 12))),
-              ]),
-              const SizedBox(height: 8),
-              _buildTimeStatus(active),
-              const SizedBox(height: 12),
-              _infoRow(Icons.person_outline, active['teacher'] ?? ''),
-              const SizedBox(height: 6),
-              _infoRow(Icons.location_on_outlined, active['classroom'] ?? ''),
-              const SizedBox(height: 6),
-              _infoRow(Icons.calendar_today_outlined, active['date'] ?? ''),
-              const SizedBox(height: 6),
-              _infoRow(Icons.access_time,
-                  '${active['start_time']?.toString().substring(0,5)} → ${active['end_time']?.toString().substring(0,5)}'),
-              const SizedBox(height: 16),
-              // ── Present / Absent cards ──
-              Row(children: [
-                Expanded(child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFDCFCE7),
-                    borderRadius: BorderRadius.circular(14)),
-                  child: Column(children: [
-                    const Icon(Icons.check_circle, color: Colors.green, size: 32),
-                    const SizedBox(height: 8),
-                    Text('$present', style: const TextStyle(fontSize: 28,
-                        fontWeight: FontWeight.w800, color: Colors.green)),
-                    const Text('Present', style: TextStyle(
-                        fontSize: 13, color: Colors.green, fontWeight: FontWeight.w600)),
-                  ]))),
-                const SizedBox(width: 12),
-                Expanded(child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEE2E2),
-                    borderRadius: BorderRadius.circular(14)),
-                  child: Column(children: [
-                    const Icon(Icons.cancel, color: Colors.red, size: 32),
-                    const SizedBox(height: 8),
-                    Text('$absent', style: const TextStyle(fontSize: 28,
-                        fontWeight: FontWeight.w800, color: Colors.red)),
-                    const Text('Absent', style: TextStyle(
-                        fontSize: 13, color: Colors.red, fontWeight: FontWeight.w600)),
-                  ]))),
-              ]),
-              const SizedBox(height: 12),
-              // ── Attendance List toggle ──
-              GestureDetector(
-                onTap: () => setState(() => _showList = !_showList),
-                child: Row(children: [
-                  const Icon(Icons.people_outline, color: Color(0xFF0039CB), size: 20),
-                  const SizedBox(width: 8),
-                  const Text('Attendance List',
-                      style: TextStyle(color: Color(0xFF0039CB),
-                          fontWeight: FontWeight.w700, fontSize: 14)),
-                  const Spacer(),
-                  Icon(_showList ? Icons.expand_less : Icons.expand_more,
-                      color: const Color(0xFF0039CB)),
-                ])),
-              if (_showList) ...[
-                const SizedBox(height: 10),
-                ...attendances.map((a) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(children: [
-                    Icon(a['status'] == 'present' ? Icons.check_circle : Icons.cancel,
-                        color: a['status'] == 'present' ? Colors.green : Colors.red,
-                        size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(a['student'] ?? '',
-                        style: const TextStyle(fontSize: 13,
-                            fontWeight: FontWeight.w600))),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: a['status'] == 'present'
-                            ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
-                        borderRadius: BorderRadius.circular(8)),
-                      child: Text(
-                        a['status'] == 'present' ? 'Présent' : 'Absent',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                            color: a['status'] == 'present' ? Colors.green : Colors.red))),
-                  ]))),
-              ],
-              const SizedBox(height: 16),
-              // ── Terminer ──
-              SizedBox(width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _stopSession,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red.shade400,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(vertical: 14)),
-                  icon: const Icon(Icons.stop_circle, color: Colors.white),
-                  label: const Text('Terminer le cours',
-                      style: TextStyle(color: Colors.white,
-                          fontWeight: FontWeight.w700, fontSize: 15)))),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Expanded(child: Text(active['subject'] ?? '',
+                  style: const TextStyle(fontSize: 18,
+                      fontWeight: FontWeight.w800, color: Color(0xFF111827)))),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF16A34A),
+                  borderRadius: BorderRadius.circular(20)),
+                child: const Text('EN COURS',
+                    style: TextStyle(color: Colors.white,
+                        fontWeight: FontWeight.w800, fontSize: 12))),
             ]),
-          ),
-        ]),
+            const SizedBox(height: 8),
+            _buildTimeStatus(active),
+            const SizedBox(height: 12),
+            _infoRow(Icons.person_outline, active['teacher'] ?? ''),
+            const SizedBox(height: 6),
+            _infoRow(Icons.location_on_outlined, active['classroom'] ?? ''),
+            const SizedBox(height: 6),
+            _infoRow(Icons.calendar_today_outlined, active['date'] ?? ''),
+            const SizedBox(height: 6),
+            _infoRowTime(
+                '${active['start_time']?.toString().substring(0,5)} → ${active['end_time']?.toString().substring(0,5)}'),
+            const SizedBox(height: 16),
+            Row(children: [
+              Expanded(child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDCFCE7),
+                  borderRadius: BorderRadius.circular(14)),
+                child: Column(children: [
+                  const Icon(Icons.check_circle, color: Colors.green, size: 32),
+                  const SizedBox(height: 8),
+                  Text('$present', style: const TextStyle(fontSize: 28,
+                      fontWeight: FontWeight.w800, color: Colors.green)),
+                  const Text('Présent', style: TextStyle(
+                      fontSize: 13, color: Colors.green, fontWeight: FontWeight.w600)),
+                ]))),
+              const SizedBox(width: 12),
+              Expanded(child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEE2E2),
+                  borderRadius: BorderRadius.circular(14)),
+                child: Column(children: [
+                  const Icon(Icons.cancel, color: Colors.red, size: 32),
+                  const SizedBox(height: 8),
+                  Text('$absent', style: const TextStyle(fontSize: 28,
+                      fontWeight: FontWeight.w800, color: Colors.red)),
+                  const Text('Absent', style: TextStyle(
+                      fontSize: 13, color: Colors.red, fontWeight: FontWeight.w600)),
+                ]))),
+            ]),
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () => setState(() => _showList = !_showList),
+              child: Row(children: [
+                const Icon(Icons.people_outline, color: Color(0xFF0039CB), size: 20),
+                const SizedBox(width: 8),
+                const Text('Liste de présence',
+                    style: TextStyle(color: Color(0xFF0039CB),
+                        fontWeight: FontWeight.w700, fontSize: 14)),
+                const Spacer(),
+                Icon(_showList ? Icons.expand_less : Icons.expand_more,
+                    color: const Color(0xFF0039CB)),
+              ])),
+            if (_showList) ...[
+              const SizedBox(height: 10),
+              ...attendances.map((a) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(children: [
+                  Icon(a['status'] == 'present' ? Icons.check_circle : Icons.cancel,
+                      color: a['status'] == 'present' ? Colors.green : Colors.red,
+                      size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(a['student'] ?? '',
+                      style: const TextStyle(fontSize: 13,
+                          fontWeight: FontWeight.w600))),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: a['status'] == 'present'
+                          ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                      borderRadius: BorderRadius.circular(8)),
+                    child: Text(
+                      a['status'] == 'present' ? 'Présent' : 'Absent',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                          color: a['status'] == 'present' ? Colors.green : Colors.red))),
+                ]))),
+            ],
+            const SizedBox(height: 16),
+            SizedBox(width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _stopSession,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red.shade400,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 14)),
+                icon: const Icon(Icons.stop_circle, color: Colors.white),
+                label: const Text('Terminer le cours',
+                    style: TextStyle(color: Colors.white,
+                        fontWeight: FontWeight.w700, fontSize: 15)))),
+          ]),
+        ),
       ));
   }
 
@@ -540,11 +445,11 @@ class _TeacherDashboardState extends State<TeacherDashboard>
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: Colors.red.shade200)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.timer_off, color: Colors.red.shade600, size: 16),
+            Icon(Icons.alarm_off, color: Colors.red.shade600, size: 16),
             const SizedBox(width: 6),
-            Text('Temps terminé — Veuillez terminer le cours',
+            Flexible(child: Text('Temps terminé — Veuillez terminer le cours',
                 style: TextStyle(color: Colors.red.shade600,
-                    fontWeight: FontWeight.w700, fontSize: 12)),
+                    fontWeight: FontWeight.w700, fontSize: 12))),
           ]));
       } else {
         final h = diff ~/ 60;
@@ -557,11 +462,11 @@ class _TeacherDashboardState extends State<TeacherDashboard>
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: Colors.green.shade200)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.timer, color: Colors.green, size: 16),
+            const Icon(Icons.alarm, color: Colors.green, size: 16),
             const SizedBox(width: 6),
-            Text('⏱️ $timeStr',
+            Flexible(child: Text('⏰ $timeStr',
                 style: const TextStyle(color: Colors.green,
-                    fontWeight: FontWeight.w700, fontSize: 12)),
+                    fontWeight: FontWeight.w700, fontSize: 12))),
           ]));
       }
     } catch (_) {
@@ -573,7 +478,15 @@ class _TeacherDashboardState extends State<TeacherDashboard>
     return Row(children: [
       Icon(icon, size: 16, color: const Color(0xFF6B7280)),
       const SizedBox(width: 6),
-      Text(text, style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
+      Flexible(child: Text(text, style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)))),
+    ]);
+  }
+
+  Widget _infoRowTime(String text) {
+    return Row(children: [
+      const Icon(Icons.alarm, size: 16, color: Color(0xFF6B7280)),
+      const SizedBox(width: 6),
+      Flexible(child: Text(text, style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)))),
     ]);
   }
 
@@ -653,10 +566,21 @@ class _TeacherDashboardState extends State<TeacherDashboard>
                     color: isActive ? Colors.green : Colors.grey))),
         ]),
         const SizedBox(height: 6),
-        Text('📍 ${s['classroom']}  •  📅 ${s['date']}  •  '
-            '⏰ ${s['start_time']?.toString().substring(0,5)} → '
-            '${s['end_time']?.toString().substring(0,5)}',
-            style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+        Row(children: [
+          const Icon(Icons.location_on_outlined, size: 13, color: Color(0xFF6B7280)),
+          const SizedBox(width: 4),
+          Text('${s['classroom']}', style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+          const SizedBox(width: 8),
+          const Icon(Icons.calendar_today_outlined, size: 13, color: Color(0xFF6B7280)),
+          const SizedBox(width: 4),
+          Text('${s['date']}', style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+          const SizedBox(width: 8),
+          const Icon(Icons.alarm, size: 13, color: Color(0xFF6B7280)),
+          const SizedBox(width: 4),
+          Flexible(child: Text(
+            '${s['start_time']?.toString().substring(0,5)} → ${s['end_time']?.toString().substring(0,5)}',
+            style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)))),
+        ]),
         const SizedBox(height: 8),
         Row(children: [
           _chip('✅ $present', Colors.green),
@@ -675,6 +599,7 @@ class _TeacherDashboardState extends State<TeacherDashboard>
   }
 
   Widget _scheduleCard(Map<String, dynamic> slot) {
+    // ✅ CORRECTION 1 — Bouton Lancer caché si cours terminé
     final canStart = _activeSession == null && _canStartNow(slot);
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -683,25 +608,34 @@ class _TeacherDashboardState extends State<TeacherDashboard>
           borderRadius: BorderRadius.circular(16),
           boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
               blurRadius: 8, offset: const Offset(0,3))]),
-      child: Row(children: [
-        Container(width: 48, height: 48,
-          decoration: BoxDecoration(color: const Color(0xFFDBEAFE),
-              borderRadius: BorderRadius.circular(12)),
-          child: const Icon(Icons.class_, color: Color(0xFF0039CB))),
-        const SizedBox(width: 14),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(slot['subject'] ?? '',
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-          Text('${slot['day']}  •  '
-              '${slot['start_time']?.toString().substring(0,5)} → '
-              '${slot['end_time']?.toString().substring(0,5)}',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
-          Text('📍 Salle ${slot['classroom']}',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
-        ])),
-        if (canStart)
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(width: 48, height: 48,
+            decoration: BoxDecoration(color: const Color(0xFFDBEAFE),
+                borderRadius: BorderRadius.circular(12)),
+            child: const Icon(Icons.class_, color: Color(0xFF0039CB))),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(slot['subject'] ?? '',
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+            Row(children: [
+              const Icon(Icons.alarm, size: 13, color: Color(0xFF6B7280)),
+              const SizedBox(width: 4),
+              Flexible(child: Text(
+                '${slot['day']}  •  ${slot['start_time']?.toString().substring(0,5)} → ${slot['end_time']?.toString().substring(0,5)}',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+                overflow: TextOverflow.ellipsis,
+              )),
+            ]),
+            Text('📍 Salle ${slot['classroom']}',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+          ])),
+        ]),
+        // ✅ CORRECTION 1 — Bouton Lancer visible seulement si cours pas terminé
+        if (canStart) ...[
+          const SizedBox(height: 12),
           SizedBox(
-            width: 100,
+            width: double.infinity,
             child: ElevatedButton.icon(
               onPressed: () => _startSession(slot),
               style: ElevatedButton.styleFrom(
@@ -709,10 +643,27 @@ class _TeacherDashboardState extends State<TeacherDashboard>
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10)),
                 elevation: 0,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8)),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10)),
               icon: const Icon(Icons.play_arrow, color: Colors.white, size: 16),
               label: const Text('Lancer', style: TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12)))),
+                  color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)))),
+        ],
+        // ✅ CORRECTION 1 — Afficher message si cours terminé
+        if (!canStart && _activeSession == null) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(8)),
+            child: Row(children: [
+              Icon(Icons.lock_clock, size: 14, color: Colors.grey.shade500),
+              const SizedBox(width: 6),
+              Text('Hors horaire', style: TextStyle(
+                  fontSize: 11, color: Colors.grey.shade500,
+                  fontWeight: FontWeight.w600)),
+            ])),
+        ],
       ]),
     );
   }
@@ -728,9 +679,6 @@ class _TeacherDashboardState extends State<TeacherDashboard>
 }
 
 
-// ═══════════════════════════════════════════════════
-// PAGE PROFIL PROFESSEUR
-// ═══════════════════════════════════════════════════
 class _TeacherProfilePage extends StatelessWidget {
   final String token;
   final Map<String, dynamic> teacher;
@@ -763,7 +711,6 @@ class _TeacherProfilePage extends StatelessWidget {
       ),
       body: SingleChildScrollView(
         child: Column(children: [
-          // ── Header bleu ──
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 32),
@@ -853,13 +800,13 @@ class _TeacherProfilePage extends StatelessWidget {
               borderRadius: BorderRadius.circular(12)),
           child: Icon(icon, color: Colors.white, size: 22)),
         const SizedBox(width: 14),
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label, style: const TextStyle(fontSize: 12,
               color: Color(0xFF9CA3AF), fontWeight: FontWeight.w500)),
           const SizedBox(height: 4),
           Text(value, style: const TextStyle(fontSize: 15,
               fontWeight: FontWeight.w700, color: Color(0xFF111827))),
-        ]),
+        ])),
       ]),
     );
   }

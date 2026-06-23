@@ -11,7 +11,7 @@ class AuthService {
   // =====================================
 
   static const String baseUrl =
-      "http://192.168.0.123:8000/api";
+      "http://127.0.0.1:8000/api";
 
   // =====================================
   // STORAGE KEYS

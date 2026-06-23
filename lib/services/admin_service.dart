@@ -6,7 +6,7 @@ import '../models/dashboard_stats.dart';
 
 class AdminService {
 
-  static const String _base = "http://192.168.0.123:8000/api";
+  static const String _base = "http://127.0.0.1:8000/api";
 
   static Future<Map<String, String>> _headers() async {
     final prefs = await SharedPreferences.getInstance();

@@ -43,7 +43,7 @@ class _SessionsPageState
       final response = await http.get(
 
         Uri.parse(
-          "http://192.168.0.123:8000/api/teacher/dashboard/",
+          "http://127.0.0.1:8000/api/teacher/dashboard/",
         ),
 
         headers: {
